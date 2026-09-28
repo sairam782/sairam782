@@ -87,7 +87,7 @@ I build ML systems that leave the notebook: vision models, generative models, an
 | [**LaughLens**](https://github.com/sairam782/laughlens) | Can an AI explain why humans laugh? Structured humor hypotheses from Gemma, checked against human feedback. | Gemma, TypeScript |
 | [**Skin RL**](https://github.com/sairam782/skin-RL) | Reinforcement learning for skin cancer classification with DQN and Dueling DQN. | Python, RL |
 
-## Contribution snake
+
 
 <!-- <p align="center">
   <picture>
