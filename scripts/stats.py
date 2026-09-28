@@ -3,8 +3,8 @@
 
 Outputs (dark + light variant of each):
   header-{dark,light}.svg  animated name + typing roles
-  stats-{dark,light}.svg   this-year numbers: contributions, commits, streaks, languages
-  graph-{dark,light}.svg   daily contributions this year with a 7-day average line
+  stats-{dark,light}.svg   this-year highlights (only metrics that clear a "strong" bar) + languages
+  graph-{dark,light}.svg   daily contributions over the busiest recent window, 7-day average line
 
 Standard library only. Run:  python3 scripts/stats.py --user sairam782 --out dist
 Needs GITHUB_TOKEN (the Actions token is enough for public data).
@@ -30,6 +30,7 @@ ROLES = [
     "Open to 2027 ML / Applied Scientist roles",
 ]
 SKIP_LANGS = {"Jupyter Notebook", "HTML", "CSS", "SCSS"}  # notebook outputs and markup inflate byte counts
+GRAPH_ACTIVE_RATIO = 0.45  # graph shows the longest window where at least this share of days are active
 
 THEMES = {
     "dark": dict(
@@ -58,8 +59,6 @@ query($login: String!, $from: DateTime!, $to: DateTime!) {
     contributionsCollection(from: $from, to: $to) {
       totalCommitContributions
       totalPullRequestContributions
-      totalIssueContributions
-      totalPullRequestReviewContributions
       totalRepositoriesWithContributedCommits
       restrictedContributionsCount
       contributionCalendar {
@@ -70,6 +69,7 @@ query($login: String!, $from: DateTime!, $to: DateTime!) {
     repositories(ownerAffiliations: OWNER, isFork: false, first: 100,
                  orderBy: {field: PUSHED_AT, direction: DESC}) {
       nodes {
+        createdAt
         languages(first: 10, orderBy: {field: SIZE, direction: DESC}) {
           edges { size node { name color } }
         }
@@ -79,47 +79,64 @@ query($login: String!, $from: DateTime!, $to: DateTime!) {
 }
 """
 
+MERGED_QUERY = """
+query($q: String!) { search(query: $q, type: ISSUE, first: 1) { issueCount } }
+"""
 
-def fetch(user, token, now):
-    start = dt.datetime(now.year, 1, 1, tzinfo=dt.timezone.utc)
-    body = json.dumps({"query": QUERY, "variables": {
-        "login": user, "from": start.isoformat(), "to": now.isoformat()}}).encode()
+
+def gql(token, query, variables):
+    body = json.dumps({"query": query, "variables": variables}).encode()
     req = urllib.request.Request("https://api.github.com/graphql", data=body, headers={
         "Authorization": f"bearer {token}", "Content-Type": "application/json",
         "User-Agent": "profile-stats"})
     with urllib.request.urlopen(req, timeout=60) as r:
         data = json.load(r)
     if data.get("errors"):
-        raise SystemExit(f"GraphQL error: {data['errors']}")
-    return data["data"]["user"]
+        raise RuntimeError(f"GraphQL error: {data['errors']}")
+    return data["data"]
+
+
+def fetch(user, token, now):
+    start = dt.datetime(now.year, 1, 1, tzinfo=dt.timezone.utc)
+    data = gql(token, QUERY, {"login": user, "from": start.isoformat(), "to": now.isoformat()})["user"]
+    try:  # merged PRs are a nice-to-have; skip quietly if search is unavailable
+        q = f"author:{user} is:pr is:merged created:>={start:%Y-%m-%d}"
+        data["mergedPRs"] = gql(token, MERGED_QUERY, {"q": q})["search"]["issueCount"]
+    except Exception as e:  # noqa: BLE001
+        print(f"merged PR search skipped: {e}")
+        data["mergedPRs"] = 0
+    return data
 
 
 def demo_data(now):
+    """Quiet first half of the year, then a busy stretch: close to the real profile."""
     rnd = random.Random(7)
     d, days = dt.date(now.year, 1, 1), []
     while d <= now.date():
-        heat = 0.25 + 0.75 * (d.timetuple().tm_yday / 366) ** 2
-        c = rnd.choice([0, 0, 0, 1, 2, 3, 5, 8]) if rnd.random() < heat else 0
+        busy = d >= dt.date(now.year, 7, 12)
+        p = 0.55 if busy else 0.05
+        c = rnd.choice([1, 1, 2, 3, 3, 4, 5, 6, 8, 12]) if rnd.random() < p else 0
         days.append({"date": d.isoformat(), "contributionCount": c})
         d += dt.timedelta(days=1)
+    langs = [("Python", 900_000, "#3572A5"), ("JavaScript", 520_000, "#f1e05a"),
+             ("TypeScript", 90_000, "#3178c6"), ("Shell", 4_000, "#89e051")]
     return {
         "contributionsCollection": {
-            "totalCommitContributions": 412, "totalPullRequestContributions": 38,
-            "totalIssueContributions": 6, "totalPullRequestReviewContributions": 3,
-            "totalRepositoriesWithContributedCommits": 17, "restrictedContributionsCount": 0,
+            "totalCommitContributions": 131, "totalPullRequestContributions": 32,
+            "totalRepositoriesWithContributedCommits": 13, "restrictedContributionsCount": 0,
             "contributionCalendar": {"totalContributions": sum(x["contributionCount"] for x in days),
                                      "weeks": [{"contributionDays": days}]},
         },
-        "repositories": {"nodes": [{"languages": {"edges": [
-            {"size": 900_000, "node": {"name": "Python", "color": "#3572A5"}},
-            {"size": 520_000, "node": {"name": "JavaScript", "color": "#f1e05a"}},
-            {"size": 210_000, "node": {"name": "TypeScript", "color": "#3178c6"}},
-            {"size": 60_000, "node": {"name": "HTML", "color": "#e34c26"}},
-            {"size": 40_000, "node": {"name": "CSS", "color": "#663399"}},
-            {"size": 9_000, "node": {"name": "Shell", "color": "#89e051"}},
-            {"size": 5_000, "node": {"name": "C++", "color": "#f34b7d"}},
-        ]}}]},
+        "repositories": {"nodes": [{"createdAt": f"{now.year}-0{m}-10T00:00:00Z", "languages": {"edges": [
+            {"size": s, "node": {"name": n, "color": c}} for n, s, c in langs]}} for m in (3, 5, 7, 7, 8, 8, 9, 9, 9)]
+            + [{"createdAt": "2024-02-01T00:00:00Z", "languages": {"edges": []}}]},
+        "mergedPRs": 24,
     }
+
+
+def window_stats(days, n):
+    part = days[-n:] if n else days
+    return sum(c for _, c in part), sum(1 for _, c in part if c > 0), len(part)
 
 
 def summarize(user, now):
@@ -138,19 +155,14 @@ def summarize(user, now):
     i = len(days) - 1
     if i >= 0 and counts[i] == 0:
         i -= 1
-    cur, cur_start = 0, None
+    cur = 0
     while i >= 0 and counts[i] > 0:
-        cur, cur_start, i = cur + 1, days[i][0], i - 1
+        cur, i = cur + 1, i - 1
 
-    best, best_range, run, run_start = 0, None, 0, None
-    for d, c in days:
-        if c > 0:
-            run_start = d if run == 0 else run_start
-            run += 1
-            if run > best:
-                best, best_range = run, (run_start, d)
-        else:
-            run = 0
+    best, run = 0, 0
+    for c in counts:
+        run = run + 1 if c > 0 else 0
+        best = max(best, run)
 
     peak_day, peak = max(days, key=lambda t: (t[1], t[0])) if days else (today, 0)
     months = {}
@@ -158,9 +170,11 @@ def summarize(user, now):
         months[d.month] = months.get(d.month, 0) + c
     best_month = max(months, key=months.get) if months else today.month
 
-    langs = {}
-    colors = {}
+    langs, colors = {}, {}
+    new_repos = 0
     for repo in user["repositories"]["nodes"]:
+        if repo.get("createdAt", "")[:4] == str(today.year):
+            new_repos += 1
         for e in repo["languages"]["edges"]:
             n = e["node"]["name"]
             if n in SKIP_LANGS:
@@ -174,18 +188,30 @@ def summarize(user, now):
     if other / total_bytes > 0.005:
         lang_list.append(("Other", other / total_bytes, "#6e7681"))
 
-    active = sum(1 for c in counts if c > 0)
-    total = sum(counts)
+    last30 = sum(counts[-30:])
+    prev30 = sum(counts[-60:-30])
+
+    # Graph window: the longest span (year, 90, 60, 30 days) where most days are active.
+    window = None
+    for label, n in ((f"in {today.year}", 0), ("in the last 90 days", 90),
+                     ("in the last 60 days", 60), ("in the last 30 days", 30)):
+        tot, act, length = window_stats(days, n)
+        if length and act / length >= GRAPH_ACTIVE_RATIO:
+            window = (label, n)
+            break
+    if window is None:  # fall back to the densest window
+        window = max(((f"in the last {n} days", n) for n in (90, 60, 30)),
+                     key=lambda w: window_stats(days, w[1])[1] / max(1, window_stats(days, w[1])[2]))
+
     return dict(
-        year=today.year, today=today, days=days, total=total,
+        year=today.year, today=today, days=days, total=sum(counts),
         private=cc["restrictedContributionsCount"],
         commits=cc["totalCommitContributions"], prs=cc["totalPullRequestContributions"],
-        issues=cc["totalIssueContributions"], reviews=cc["totalPullRequestReviewContributions"],
-        repos=cc["totalRepositoriesWithContributedCommits"],
-        active=active, n_days=len(days), cur=cur, cur_start=cur_start,
-        best=best, best_range=best_range, peak=peak, peak_day=peak_day,
+        merged=user.get("mergedPRs", 0), repos=cc["totalRepositoriesWithContributedCommits"],
+        new_repos=new_repos, cur=cur, best=best, peak=peak, peak_day=peak_day,
         best_month=best_month, best_month_total=months.get(best_month, 0),
-        avg_active=(total / active) if active else 0, langs=lang_list,
+        last30=last30, prev30=prev30, window=window,
+        active90=window_stats(days, 90)[1], langs=lang_list, n_langs=len(langs),
     )
 
 
@@ -221,8 +247,6 @@ def header_svg(t):
       .role {{ font: 500 {fs}px {MONO}; fill: {t['text']}; }}
       .cur  {{ animation: blink 1s steps(1) infinite; }}
       @keyframes blink {{ 50% {{ opacity: 0; }} }}
-      .fade {{ animation: rise .9s ease-out both; }}
-      @keyframes rise {{ from {{ opacity: 0; transform: translateY(8px); }} to {{ opacity: 1; transform: none; }} }}
     """)]
     g = t["grad"]
     out.append(f"""<defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="0">
@@ -290,21 +314,36 @@ def dedupe(frames, total):
 
 # ---------------------------------------------------------------- stats card
 
-def stats_svg(s, t):
-    h = 262
-    a = t["accents"]
-    tiles = [
-        (fmt_int(s["total"]), "Contributions",
-         f"incl. {fmt_int(s['private'])} private" if s["private"] else f"{s['avg_active']:.1f} per active day"),
-        (fmt_int(s["commits"]), "Commits", f"across {s['repos']} repos"),
-        (fmt_int(s["prs"]), "Pull requests", f"{s['issues']} issues · {s['reviews']} reviews"),
-        (fmt_int(s["active"]), "Active days",
-         f"of {s['n_days']} ({100 * s['active'] / max(1, s['n_days']):.0f}%)"),
-        (f"{s['cur']}", "Current streak",
-         f"since {fmt_day(s['cur_start'])}" if s["cur"] else "starts with a commit"),
-        (f"{s['best']}", "Longest streak",
-         f"{fmt_day(s['best_range'][0])} to {fmt_day(s['best_range'][1])}" if s["best_range"] else "no streak yet"),
+def pick_tiles(s):
+    """Only metrics that look strong make the card. List order is priority; the first 6 win."""
+    y = s["year"]
+    up = (s["last30"] - s["prev30"]) / s["prev30"] * 100 if s["prev30"] else 0
+    month = dt.date(2000, s["best_month"], 1).strftime("%B")
+    cands = [
+        (s["total"] >= 50, fmt_int(s["total"]), "Contributions", "since Jan 1"),
+        (s["commits"] >= 50, fmt_int(s["commits"]), "Commits",
+         f"across {s['repos']} repos" if s["repos"] >= 3 else f"in {y}"),
+        (s["prs"] >= 10, fmt_int(s["prs"]), "Pull requests",
+         f"{s['merged']} merged" if s["merged"] >= 5 else f"opened in {y}"),
+        (s["last30"] >= 30, fmt_int(s["last30"]), "Last 30 days",
+         f"▲ {up:.0f}% vs prior month" if up >= 10 else "contributions"),
+        (s["new_repos"] >= 3, fmt_int(s["new_repos"]), "New projects", f"started in {y}"),
+        (s["peak"] >= 8, fmt_int(s["peak"]), "Best day", f"on {fmt_day(s['peak_day'])}"),
+        (s["cur"] >= 7, fmt_int(s["cur"]), "Day streak", "and going"),
+        (s["best"] >= 10, fmt_int(s["best"]), "Longest streak", f"days in {y}"),
+        (s["active90"] >= 45, fmt_int(s["active90"]), "Active days", "of the last 90"),
+        (s["best_month_total"] >= 40, fmt_int(s["best_month_total"]), "Best month", month),
+        (s["n_langs"] >= 4, fmt_int(s["n_langs"]), "Languages", "in public repos"),
     ]
+    tiles = [c[1:] for c in cands if c[0]][:6]
+    return tiles or [(fmt_int(s["total"]), "Contributions", "since Jan 1")]
+
+
+def stats_svg(s, t):
+    a = t["accents"]
+    tiles = pick_tiles(s)
+    pad, gap, top, th = 24, 12, 54, 96
+    h = top + th + 30 + 12 + 30 + 22
     css = f"""
       .h {{ font: 700 17px {SANS}; fill: {t['text']}; }}
       .sub {{ font: 400 12.5px {SANS}; fill: {t['muted']}; }}
@@ -312,14 +351,11 @@ def stats_svg(s, t):
       .lab {{ font: 600 12.5px {SANS}; fill: {t['text']}; }}
       .sm {{ font: 400 11px {SANS}; fill: {t['muted']}; }}
       .hl {{ font: 400 12.5px {SANS}; fill: {t['muted']}; }}
-      .hl tspan.b {{ fill: {t['text']}; font-weight: 600; }}
       .lg {{ font: 400 11.5px {SANS}; fill: {t['muted']}; }}
       .shine {{ animation: sweep 5s ease-in-out infinite; }}
       @keyframes sweep {{ from {{ transform: translateX(-160px); }} to {{ transform: translateX({W}px); }} }}
-      .dot {{ animation: pulse 2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }}
-      @keyframes pulse {{ 50% {{ opacity: .35; }} }}
     """
-    out = [svg_open(h, f"{s['year']} on GitHub: {s['total']} contributions, {s['commits']} commits", css),
+    out = [svg_open(h, f"{s['year']} on GitHub: " + ", ".join(f"{n} {l.lower()}" for n, l, _ in tiles), css),
            card(t, h)]
     out.append('<defs><linearGradient id="sh" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/>'
                '<stop offset=".5" stop-color="#fff" stop-opacity=".45"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>'
@@ -328,27 +364,18 @@ def stats_svg(s, t):
     out.append(f'<text class="sub" x="{W - 24}" y="36" text-anchor="end">'
                f'Jan 1 to {fmt_day(s["today"])} · refreshed daily</text>')
 
-    pad, gap, top, th = 24, 12, 54, 96
-    tw = (W - 2 * pad - 5 * gap) / 6
+    k = len(tiles)
+    tw = (W - 2 * pad - (k - 1) * gap) / k
     for i, (num, lab, sub) in enumerate(tiles):
         x = pad + i * (tw + gap)
-        out.append(f'<g>'
-                   f'<rect x="{x:.1f}" y="{top}" width="{tw:.1f}" height="{th}" rx="9" fill="{t["tile"]}" stroke="{t["border"]}"/>'
-                   f'<rect x="{x + 14:.1f}" y="{top + 14}" width="18" height="3" rx="1.5" fill="{a[i]}"/>'
-                   f'<text class="num" x="{x + 14:.1f}" y="{top + 50}" fill="{a[i]}">{escape(num)}</text>'
+        out.append(f'<g><rect x="{x:.1f}" y="{top}" width="{tw:.1f}" height="{th}" rx="9" fill="{t["tile"]}" stroke="{t["border"]}"/>'
+                   f'<rect x="{x + 14:.1f}" y="{top + 14}" width="18" height="3" rx="1.5" fill="{a[i % len(a)]}"/>'
+                   f'<text class="num" x="{x + 14:.1f}" y="{top + 50}" fill="{a[i % len(a)]}">{escape(num)}</text>'
                    f'<text class="lab" x="{x + 14:.1f}" y="{top + 69}">{escape(lab)}</text>'
                    f'<text class="sm" x="{x + 14:.1f}" y="{top + 85}">{escape(sub)}</text></g>')
 
-    y = top + th + 30
-    month = dt.date(2000, s["best_month"], 1).strftime("%B")
-    out.append(f'<text class="hl" x="24" y="{y}">Busiest day <tspan class="b">{fmt_day(s["peak_day"])}</tspan> '
-               f'({s["peak"]}) <tspan dx="10">·</tspan><tspan dx="10">Best month</tspan> '
-               f'<tspan class="b">{month}</tspan> ({fmt_int(s["best_month_total"])}) '
-               f'<tspan dx="10">·</tspan><tspan dx="10">Avg</tspan> <tspan class="b">{s["avg_active"]:.1f}</tspan> '
-               f'per active day</text>')
-
     # languages
-    y += 22
+    y = top + th + 30
     out.append(f'<text class="hl" x="24" y="{y}">Top languages in public repos</text>')
     y += 12
     bw = W - 48
@@ -377,23 +404,32 @@ def nice_max(v):
     if v <= 4:
         return 4
     mag = 10 ** math.floor(math.log10(v))
-    for m in (1, 2, 2.5, 5, 10):
+    for m in (1, 1.5, 2, 2.5, 5, 10):
         if m * mag >= v:
             return m * mag
     return 10 * mag
 
 
 def graph_svg(s, t):
-    h = 300
+    h = 312
     a = t["accents"]
-    days = s["days"]
+    all_counts = [c for _, c in s["days"]]
+    avg_all = []
+    for i in range(len(all_counts)):
+        win = all_counts[max(0, i - 6): i + 1]
+        avg_all.append(sum(win) / len(win))
+    label, span = s["window"]
+    days = s["days"][-span:] if span else s["days"]
+    lead = next((i for i, (_, c) in enumerate(days) if c), 0)
+    if lead > 7:  # skip a quiet lead-in so the chart starts where the activity does
+        days = days[lead:]
+        label = f"since {fmt_day(days[0][0])}"
     counts = [c for _, c in days]
+    avg = avg_all[-len(days):]
     n = len(days)
-    avg = []
-    for i in range(n):
-        win = counts[max(0, i - 6): i + 1]
-        avg.append(sum(win) / len(win))
-    L, R, T, B = 48, 24, 64, h - 42
+    peak_day, peak = max(days, key=lambda d: (d[1], d[0])) if days else (s["today"], 0)
+
+    L, R, T, B = 48, 24, 84, h - 42
     pw, ph = W - L - R, B - T
     ymax = nice_max(max(counts + [1]))
     step = pw / max(1, n)
@@ -402,17 +438,21 @@ def graph_svg(s, t):
 
     css = f"""
       .h {{ font: 700 17px {SANS}; fill: {t['text']}; }}
+      .sub {{ font: 400 12.5px {SANS}; fill: {t['muted']}; }}
+      .sub tspan {{ fill: {t['text']}; font-weight: 600; }}
       .ax {{ font: 400 11px {SANS}; fill: {t['muted']}; }}
       .lg {{ font: 400 12px {SANS}; fill: {t['muted']}; }}
       .pk {{ font: 600 11.5px {SANS}; fill: {t['text']}; }}
       .ring {{ animation: ring 2.2s ease-out infinite; transform-box: fill-box; transform-origin: center; }}
       @keyframes ring {{ from {{ transform: scale(1); opacity: .9; }} to {{ transform: scale(3.2); opacity: 0; }} }}
     """
-    out = [svg_open(h, f"Daily contributions in {s['year']}", css), card(t, h)]
+    out = [svg_open(h, f"Daily contributions {label}", css), card(t, h)]
     out.append(f'<defs><linearGradient id="ar" x1="0" x2="0" y1="0" y2="1">'
                f'<stop offset="0" stop-color="{a[1]}" stop-opacity=".35"/>'
                f'<stop offset="1" stop-color="{a[1]}" stop-opacity="0"/></linearGradient></defs>')
-    out.append(f'<text class="h" x="24" y="36">Daily contributions in {s["year"]}</text>')
+    out.append(f'<text class="h" x="24" y="36">Daily contributions {escape(label)}</text>')
+    out.append(f'<text class="sub" x="24" y="58"><tspan>{fmt_int(sum(counts))}</tspan> contributions'
+               f' · peak of <tspan>{peak}</tspan> on {fmt_day(peak_day)}</text>')
     lx = W - 24
     out.append(f'<g transform="translate({lx - 205},0)">'
                f'<rect x="0" y="27" width="10" height="10" rx="2" fill="{a[0]}" opacity=".6"/>'
@@ -420,8 +460,9 @@ def graph_svg(s, t):
                f'<rect x="92" y="31" width="18" height="3" rx="1.5" fill="{a[1]}"/>'
                f'<text class="lg" x="116" y="36">7-day average</text></g>')
 
-    for k in range(5):
-        v = ymax * k / 4
+    steps = next((k for k in (4, 3, 5) if (ymax / k) == int(ymax / k)), 4)
+    for k in range(steps + 1):
+        v = ymax * k / steps
         yy = Y(v)
         dash = "" if k == 0 else ' stroke-dasharray="3 4"'
         out.append(f'<line x1="{L}" x2="{W - R}" y1="{yy:.1f}" y2="{yy:.1f}" stroke="{t["grid"]}"{dash}/>')
@@ -429,30 +470,27 @@ def graph_svg(s, t):
         out.append(f'<text class="ax" x="{L - 10}" y="{yy + 4:.1f}" text-anchor="end">{lab}</text>')
 
     for i, (d, _) in enumerate(days):
-        if d.day == 1:
+        if d.day == 1 or (i == 0 and d.day <= 7):
             out.append(f'<line x1="{X(i) - step / 2:.1f}" x2="{X(i) - step / 2:.1f}" y1="{B}" y2="{B + 5}" stroke="{t["border"]}"/>')
             out.append(f'<text class="ax" x="{X(i) - step / 2 + 4:.1f}" y="{B + 20}">{d:%b}</text>')
 
     bw = max(1.2, step * 0.72)
-    out.append('<g class="bars">')
+    out.append("<g>")
     for i, c in enumerate(counts):
         if c:
             out.append(f'<rect x="{X(i) - bw / 2:.2f}" y="{Y(c):.1f}" width="{bw:.2f}" '
-                       f'height="{B - Y(c):.1f}" rx="{min(1.5, bw / 2):.2f}" fill="{a[0]}" opacity=".55"/>')
+                       f'height="{B - Y(c):.1f}" rx="{min(2, bw / 2):.2f}" fill="{a[0]}" opacity=".55"/>')
     out.append("</g>")
 
     if n:
         pts = " ".join(f"{X(i):.1f},{Y(v):.1f}" for i, v in enumerate(avg))
-        out.append(f'<polygon class="area" points="{X(0):.1f},{B} {pts} {X(n - 1):.1f},{B}" fill="url(#ar)"/>')
-        out.append(f'<polyline class="line" points="{pts}" fill="none" stroke="{a[1]}" '
+        out.append(f'<polygon points="{X(0):.1f},{B} {pts} {X(n - 1):.1f},{B}" fill="url(#ar)"/>')
+        out.append(f'<polyline points="{pts}" fill="none" stroke="{a[1]}" '
                    f'stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>')
-        pi = next(i for i, (d, _) in enumerate(days) if d == s["peak_day"])
-        px, py = X(pi), Y(s["peak"])
-        label = f"Peak: {s['peak']} on {fmt_day(s['peak_day'])}"
-        tx = min(max(px, L + 70), W - R - 70)
-        out.append(f'<g><circle class="ring" cx="{px:.1f}" cy="{py:.1f}" r="4" fill="none" stroke="{a[4]}" stroke-width="1.5"/>'
-                   f'<circle cx="{px:.1f}" cy="{py:.1f}" r="4" fill="{a[4]}" stroke="{t["bg"]}" stroke-width="2"/>'
-                   f'<text class="pk" x="{tx:.1f}" y="{max(py - 10, T - 8):.1f}" text-anchor="middle">{escape(label)}</text></g>')
+        pi = next(i for i, (d, _) in enumerate(days) if d == peak_day)
+        px, py = X(pi), Y(peak)
+        out.append(f'<circle class="ring" cx="{px:.1f}" cy="{py:.1f}" r="4" fill="none" stroke="{a[4]}" stroke-width="1.5"/>'
+                   f'<circle cx="{px:.1f}" cy="{py:.1f}" r="4" fill="{a[4]}" stroke="{t["bg"]}" stroke-width="2"/>')
     out.append("</svg>")
     return "".join(out)
 
@@ -481,8 +519,8 @@ def main():
         for name, svg in (("header", header_svg(t)), ("stats", stats_svg(s, t)), ("graph", graph_svg(s, t))):
             with open(os.path.join(args.out, f"{name}-{mode}.svg"), "w", encoding="utf-8") as f:
                 f.write(svg)
-    print(f"{s['year']}: {s['total']} contributions, {s['commits']} commits, "
-          f"{s['active']} active days, streak {s['cur']} (best {s['best']})")
+    print(f"{s['year']}: {s['total']} contributions, {s['commits']} commits, graph window: {s['window'][0]}")
+    print("tiles:", pick_tiles(s))
 
 
 if __name__ == "__main__":
