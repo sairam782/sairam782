@@ -12,7 +12,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sairam782/sairam782/output/stats-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/sairam782/sairam782/output/stats-light.svg">
-    <img alt="This year on GitHub: contributions, commits, pull requests, active days and streaks" src="https://raw.githubusercontent.com/sairam782/sairam782/output/stats-dark.svg" width="100%">
+    <img alt="This year on GitHub: highlights" src="https://raw.githubusercontent.com/sairam782/sairam782/output/stats-dark.svg" width="100%">
   </picture>
 </p>
 
@@ -20,7 +20,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sairam782/sairam782/output/graph-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/sairam782/sairam782/output/graph-light.svg">
-    <img alt="Daily contributions this year with a 7-day average" src="https://raw.githubusercontent.com/sairam782/sairam782/output/graph-dark.svg" width="100%">
+    <img alt="Daily contributions with a 7-day average" src="https://raw.githubusercontent.com/sairam782/sairam782/output/graph-dark.svg" width="100%">
   </picture>
 </p>
 
@@ -69,10 +69,10 @@ I build ML systems that leave the notebook: vision models, generative models, an
 
 | Project | What it does | Built with |
 |---|---|---|
-| [**Trinetra**](https://github.com/sairam782/trinetra) | Autonomous incident response. Tiered agents read logs, metrics and traces, pick an approved runbook, and stop at a human gate before risky fixes. | Qwen, MCP, JavaScript |
+| [**Trinetra**](https://github.com/sairam782/trinetra) · [demo](https://trinetra-mauve.vercel.app) | Autonomous incident response. Tiered agents read logs, metrics and traces, pick an approved runbook, and stop at a human gate before risky fixes. | Qwen, MCP, JavaScript |
 | [**JobPilot**](https://github.com/sairam782/jobpilot) | Safety-first job search agent. Finds roles, matches them to your resume, and preps applications through a browser agent. | Python, LLM agents |
 | [**Money-Talks**](https://github.com/sairam782/Money-Talks) · [demo](https://money-talks-mefn.vercel.app/) | AI security analyst. Fills vendor security questionnaires from the vendor's own documents and refuses to answer anything it cannot quote. | JavaScript, LLMs |
-| [**Relay**](https://github.com/sairam782/RelayAI) | Client coordinator for small agencies. Reads each inquiry, drafts the reply in the owner's voice, offers free time slots, and waits for approval. | JavaScript, LLMs |
+| [**Relay**](https://github.com/sairam782/RelayAI) · [demo](https://relay-ai-kappa.vercel.app) | Client coordinator for small agencies. Reads each inquiry, drafts the reply in the owner's voice, offers free time slots, and waits for approval. | JavaScript, LLMs |
 | [**PaperPrism**](https://github.com/sairam782/imgPaper) | Turns a research paper into an argument map, a method pipeline, charts of its evidence, and a summary at any depth. | Python |
 | [**Pregame**](https://github.com/sairam782/PreGame) | Prep bot whose harness improves itself. Built in one day at the MongoDB Harness Engineering hackathon. | Python, MongoDB |
 
