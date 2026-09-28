@@ -29,7 +29,7 @@ ROLES = [
     "MS in AI @ NJIT · class of 2027",
     "Open to 2027 ML / Applied Scientist roles",
 ]
-SKIP_LANGS = {"Jupyter Notebook"}  # notebook outputs inflate byte counts
+SKIP_LANGS = {"Jupyter Notebook", "HTML", "CSS", "SCSS"}  # notebook outputs and markup inflate byte counts
 
 THEMES = {
     "dark": dict(
@@ -229,8 +229,10 @@ def header_svg(t):
       <stop offset="0" stop-color="{g[0]}"><animate attributeName="stop-color" values="{g[0]};{g[1]};{g[2]};{g[0]}" dur="8s" repeatCount="indefinite"/></stop>
       <stop offset="1" stop-color="{g[2]}"><animate attributeName="stop-color" values="{g[2]};{g[0]};{g[1]};{g[2]}" dur="8s" repeatCount="indefinite"/></stop>
     </linearGradient></defs>""")
-    out.append(f'<text class="name fade" x="{W / 2}" y="54" text-anchor="middle" fill="url(#g)">{escape(NAME)}</text>')
+    out.append(f'<text class="name" x="{W / 2}" y="54" text-anchor="middle" fill="url(#g)">{escape(NAME)}</text>')
 
+    # The timeline is shifted so frame 0 shows the first role fully typed.
+    # Renderers that freeze animations (reduced motion, previews) still get a complete header.
     y = 98
     cursor = []
     for i, role in enumerate(ROLES):
@@ -244,21 +246,31 @@ def header_svg(t):
         frames.append((s + type_t + hold, n))
         for k in range(n, -1, -1):
             frames.append((s + type_t + hold + erase * (n - k) / n, k))
-        frames = dedupe(frames, total)
+        frames = shift(frames, type_t, total)
         widths = ";".join(f"{k * cw:.1f}" for _, k in frames)
         times = ";".join(f"{tt / total:.5f}" for tt, _ in frames)
-        out.append(f'<clipPath id="c{i}"><rect x="{x0:.1f}" y="{y - 24}" height="34" width="0">'
+        start_w = n * cw if i == 0 else 0
+        out.append(f'<clipPath id="c{i}"><rect x="{x0:.1f}" y="{y - 24}" height="34" width="{start_w:.1f}">'
                    f'<animate attributeName="width" values="{widths}" keyTimes="{times}" '
                    f'dur="{total}s" calcMode="discrete" repeatCount="indefinite"/></rect></clipPath>')
         out.append(f'<text class="role" x="{x0:.1f}" y="{y}" clip-path="url(#c{i})">{escape(role)}</text>')
-        cursor += [(tt, x0 + k * cw + 2) for tt, k in frames if s <= tt < s + slot]
-    pairs = dedupe(cursor, total)
-    out.append(f'<rect class="cur" x="0" y="{y - 19}" width="3" height="24" rx="1" fill="{g[1]}">'
+        cursor += [((tt + type_t) % total, x0 + k * cw + 2) for tt, k in frames
+                   if s <= (tt + type_t) % total < s + slot]
+    pairs = shift(cursor, type_t, total)
+    out.append(f'<rect class="cur" x="{pairs[0][1]:.1f}" y="{y - 19}" width="3" height="24" rx="1" fill="{g[1]}">'
                f'<animate attributeName="x" values="{";".join(f"{v:.1f}" for _, v in pairs)}" '
                f'keyTimes="{";".join(f"{tt / total:.5f}" for tt, _ in pairs)}" dur="{total}s" '
                f'calcMode="discrete" repeatCount="indefinite"/></rect>')
     out.append("</svg>")
     return "".join(out)
+
+
+def shift(frames, by, total):
+    """Move a piecewise-constant timeline earlier by `by` seconds, wrapping around the cycle."""
+    frames = dedupe(frames, total)
+    at = [v for tt, v in frames if tt <= by + 1e-9][-1]
+    moved = [((tt - by) % total, v) for tt, v in frames]
+    return dedupe([(0.0, at)] + [f for f in moved if f[0] > 0], total)
 
 
 def dedupe(frames, total):
@@ -302,13 +314,16 @@ def stats_svg(s, t):
       .hl {{ font: 400 12.5px {SANS}; fill: {t['muted']}; }}
       .hl tspan.b {{ fill: {t['text']}; font-weight: 600; }}
       .lg {{ font: 400 11.5px {SANS}; fill: {t['muted']}; }}
-      .t {{ animation: rise .7s ease-out both; }}
-      @keyframes rise {{ from {{ opacity: 0; transform: translateY(6px); }} to {{ opacity: 1; transform: none; }} }}
-      .bar {{ animation: grow 1.2s ease-out both; transform-box: fill-box; transform-origin: left; }}
-      @keyframes grow {{ from {{ transform: scaleX(0); }} to {{ transform: scaleX(1); }} }}
+      .shine {{ animation: sweep 5s ease-in-out infinite; }}
+      @keyframes sweep {{ from {{ transform: translateX(-160px); }} to {{ transform: translateX({W}px); }} }}
+      .dot {{ animation: pulse 2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }}
+      @keyframes pulse {{ 50% {{ opacity: .35; }} }}
     """
     out = [svg_open(h, f"{s['year']} on GitHub: {s['total']} contributions, {s['commits']} commits", css),
            card(t, h)]
+    out.append('<defs><linearGradient id="sh" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/>'
+               '<stop offset=".5" stop-color="#fff" stop-opacity=".45"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>'
+               '</linearGradient></defs>')
     out.append(f'<text class="h" x="24" y="36">{s["year"]} on GitHub</text>')
     out.append(f'<text class="sub" x="{W - 24}" y="36" text-anchor="end">'
                f'Jan 1 to {fmt_day(s["today"])} · refreshed daily</text>')
@@ -317,7 +332,7 @@ def stats_svg(s, t):
     tw = (W - 2 * pad - 5 * gap) / 6
     for i, (num, lab, sub) in enumerate(tiles):
         x = pad + i * (tw + gap)
-        out.append(f'<g class="t" style="animation-delay:{i * 0.08:.2f}s">'
+        out.append(f'<g>'
                    f'<rect x="{x:.1f}" y="{top}" width="{tw:.1f}" height="{th}" rx="9" fill="{t["tile"]}" stroke="{t["border"]}"/>'
                    f'<rect x="{x + 14:.1f}" y="{top + 14}" width="18" height="3" rx="1.5" fill="{a[i]}"/>'
                    f'<text class="num" x="{x + 14:.1f}" y="{top + 50}" fill="{a[i]}">{escape(num)}</text>'
@@ -338,13 +353,13 @@ def stats_svg(s, t):
     y += 12
     bw = W - 48
     out.append(f'<clipPath id="lb"><rect x="24" y="{y}" width="{bw}" height="10" rx="5"/></clipPath>'
-               f'<g clip-path="url(#lb)"><g class="bar">')
+               f'<g clip-path="url(#lb)"><g>')
     x = 24.0
     for name, frac, col in s["langs"]:
         w = frac * bw
         out.append(f'<rect x="{x:.1f}" y="{y}" width="{w + 0.6:.1f}" height="10" fill="{col}"/>')
         x += w
-    out.append("</g></g>")
+    out.append(f'<rect class="shine" x="0" y="{y}" width="120" height="10" fill="url(#sh)"/></g></g>')
     y += 30
     x = 24.0
     for name, frac, col in s["langs"]:
@@ -390,12 +405,8 @@ def graph_svg(s, t):
       .ax {{ font: 400 11px {SANS}; fill: {t['muted']}; }}
       .lg {{ font: 400 12px {SANS}; fill: {t['muted']}; }}
       .pk {{ font: 600 11.5px {SANS}; fill: {t['text']}; }}
-      .line {{ stroke-dasharray: 4000; stroke-dashoffset: 4000; animation: draw 2.6s ease-out .2s forwards; }}
-      @keyframes draw {{ to {{ stroke-dashoffset: 0; }} }}
-      .bars {{ animation: up 1s ease-out both; transform-origin: 0 {B}px; }}
-      @keyframes up {{ from {{ transform: scaleY(0); }} to {{ transform: scaleY(1); }} }}
-      .area, .pkg {{ animation: fade 1s ease-out 1.6s both; }}
-      @keyframes fade {{ from {{ opacity: 0; }} to {{ opacity: 1; }} }}
+      .ring {{ animation: ring 2.2s ease-out infinite; transform-box: fill-box; transform-origin: center; }}
+      @keyframes ring {{ from {{ transform: scale(1); opacity: .9; }} to {{ transform: scale(3.2); opacity: 0; }} }}
     """
     out = [svg_open(h, f"Daily contributions in {s['year']}", css), card(t, h)]
     out.append(f'<defs><linearGradient id="ar" x1="0" x2="0" y1="0" y2="1">'
@@ -439,7 +450,8 @@ def graph_svg(s, t):
         px, py = X(pi), Y(s["peak"])
         label = f"Peak: {s['peak']} on {fmt_day(s['peak_day'])}"
         tx = min(max(px, L + 70), W - R - 70)
-        out.append(f'<g class="pkg"><circle cx="{px:.1f}" cy="{py:.1f}" r="4" fill="{a[4]}" stroke="{t["bg"]}" stroke-width="2"/>'
+        out.append(f'<g><circle class="ring" cx="{px:.1f}" cy="{py:.1f}" r="4" fill="none" stroke="{a[4]}" stroke-width="1.5"/>'
+                   f'<circle cx="{px:.1f}" cy="{py:.1f}" r="4" fill="{a[4]}" stroke="{t["bg"]}" stroke-width="2"/>'
                    f'<text class="pk" x="{tx:.1f}" y="{max(py - 10, T - 8):.1f}" text-anchor="middle">{escape(label)}</text></g>')
     out.append("</svg>")
     return "".join(out)
