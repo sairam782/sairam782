@@ -1,0 +1,47 @@
+name: Profile stats
+
+# Rebuilds the README images (header, stats, graph, snake) and pushes them
+# to the `output` branch. Runs every 6 hours, on every push to main, and on demand.
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: profile-stats
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Render header, stats and graph
+        run: python3 scripts/stats.py --user "${{ github.repository_owner }}" --out dist
+        env:
+          # Optional: add a STATS_TOKEN secret (classic PAT, read:user) to include private contributions
+          GITHUB_TOKEN: ${{ secrets.STATS_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Render contribution snake
+        uses: Platane/snk@v3
+        with:
+          github_user_name: ${{ github.repository_owner }}
+          outputs: |
+            dist/snake-light.svg
+            dist/snake-dark.svg?palette=github-dark
+
+      - name: Publish to output branch
+        uses: crazy-max/ghaction-github-pages@v4
+        with:
+          target_branch: output
+          build_dir: dist
+          commit_message: "Update profile images"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
