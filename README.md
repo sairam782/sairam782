@@ -89,7 +89,7 @@ I build ML systems that leave the notebook: vision models, generative models, an
 
 ## Contribution snake
 
-<p align="center">
+<!-- <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sairam782/sairam782/output/snake-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/sairam782/sairam782/output/snake-light.svg">
@@ -97,4 +97,4 @@ I build ML systems that leave the notebook: vision models, generative models, an
   </picture>
 </p>
 
-<p align="center"><sub>Stats, graph and snake refresh every 6 hours through GitHub Actions.</sub></p>
+<p align="center"><sub>Stats, graph and snake refresh every 6 hours through GitHub Actions.</sub></p> -->
